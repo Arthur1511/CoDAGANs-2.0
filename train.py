@@ -12,7 +12,7 @@ from sklearn.metrics import (balanced_accuracy_score, confusion_matrix,
                              f1_score, precision_score, recall_score)
 
 from trainer import MUNIT_Trainer, UNIT_Trainer
-from utils import (get_all_data_loaders, get_config, prepare_sub_folder)
+from utils import get_all_data_loaders, get_config, prepare_sub_folder
 
 try:
     from itertools import izip as zip
@@ -22,6 +22,7 @@ import os
 # import tensorboardX
 import shutil
 import sys
+import traceback
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--config', type=str,
@@ -96,126 +97,135 @@ iterations = trainer.resume(
 
 
 print('Training starts...')
-while True:
 
-    for it, data in enumerate(train_loader):
+try:
+    while True:
 
-        img_a = data[0].cuda(cuda0).detach()
-        img_b = data[1].cuda(cuda0).detach()
+        for it, data in enumerate(train_loader):
 
-        ind_a = data[2][0].item()
-        ind_b = data[3][0].item()
+            img_a = data[0].cuda(cuda0).detach()
+            img_b = data[1].cuda(cuda0).detach()
 
-        label_a = data[4].cuda(cuda1).detach()
-        label_b = data[5].cuda(cuda1).detach()
+            ind_a = data[2][0].item()
+            ind_b = data[3][0].item()
 
-        # Translation forward and backward.
-        trainer.dis_update(img_a, img_b, ind_a, ind_b, config)
-        gen_losses = trainer.gen_update(img_a, img_b, ind_a, ind_b, config)
-        torch.cuda.synchronize()
+            label_a = data[4].cuda(cuda1).detach()
+            label_b = data[5].cuda(cuda1).detach()
 
-        # Supervised forward and backward.
-        sup_losses = trainer.sup_update(
-            img_a, img_b, label_a, label_b, ind_a, ind_b, config)
+            # Translation forward and backward.
+            trainer.dis_update(img_a, img_b, ind_a, ind_b, config)
+            gen_losses = trainer.gen_update(img_a, img_b, ind_a, ind_b, config)
+            torch.cuda.synchronize()
 
-        recon_x_w_a, recon_s_w_a, recon_c_w_a, recon_x_w_b, recon_s_w_b, recon_c_w_b, recon_x_cyc_w_a, recon_x_cyc_w_b, loss_gen = gen_losses
-        sup_a, sup_b, sup_a_recon, sup_b_recon, sup_loss = sup_losses
+            # Supervised forward and backward.
+            sup_losses = trainer.sup_update(
+                img_a, img_b, label_a, label_b, ind_a, ind_b, config)
 
-        print('Iteration: %d/%d, datasets [%s, %s]' % (
-            iterations + 1, max_iter, ind_a, ind_b),)
-        print('    Gen Losses: x_w_a %.3f, s_w_a %.3f, c_w_a %.3f, x_w_b %.3f, s_w_b %.3f, c_w_b %.3f, x_cyc_w_a %.3f, x_cyc_w_b %.3f, loss_gen %.3f' % (
-            recon_x_w_a, recon_s_w_a, recon_c_w_a, recon_x_w_b, recon_s_w_b, recon_c_w_b, recon_x_cyc_w_a, recon_x_cyc_w_b, loss_gen),)
-
-        print('    Sup Losses: a %.3f, b %.3f, a_recon %.3f, b_recon %.3f, loss_sup %.3f' % (
-            sup_a, sup_b, sup_a_recon, sup_b_recon, sup_loss),)
-
-        # Dump training stats in log file
-        if (iterations + 1) % config['log_iter'] == 0:
-
-            # recon_x_w_a, recon_s_w_a, recon_c_w_a, recon_x_w_b, recon_s_w_b, recon_c_w_b, recon_x_cyc_w_a, recon_x_cyc_w_b, loss_gen = gen_losses
-            # sup_a, sup_b, sup_a_recon, sup_b_recon, sup_loss = sup_losses
+            recon_x_w_a, recon_s_w_a, recon_c_w_a, recon_x_w_b, recon_s_w_b, recon_c_w_b, recon_x_cyc_w_a, recon_x_cyc_w_b, loss_gen = gen_losses
+            sup_a, sup_b, sup_a_recon, sup_b_recon, sup_loss = sup_losses
 
             print('Iteration: %d/%d, datasets [%s, %s]' % (
-                iterations + 1, max_iter, ind_a, ind_b), file=open(str(opts.output_path + "/output.txt"), "a"))
+                iterations + 1, max_iter, ind_a, ind_b),)
             print('    Gen Losses: x_w_a %.3f, s_w_a %.3f, c_w_a %.3f, x_w_b %.3f, s_w_b %.3f, c_w_b %.3f, x_cyc_w_a %.3f, x_cyc_w_b %.3f, loss_gen %.3f' % (
-                recon_x_w_a, recon_s_w_a, recon_c_w_a, recon_x_w_b, recon_s_w_b, recon_c_w_b, recon_x_cyc_w_a, recon_x_cyc_w_b, loss_gen), file=open(str(opts.output_path + "/output.txt"), "a"))
+                recon_x_w_a, recon_s_w_a, recon_c_w_a, recon_x_w_b, recon_s_w_b, recon_c_w_b, recon_x_cyc_w_a, recon_x_cyc_w_b, loss_gen),)
 
             print('    Sup Losses: a %.3f, b %.3f, a_recon %.3f, b_recon %.3f, loss_sup %.3f' % (
-                sup_a, sup_b, sup_a_recon, sup_b_recon, sup_loss), file=open(str(opts.output_path + "/output.txt"), "a"))
-            sys.stdout.flush()
+                sup_a, sup_b, sup_a_recon, sup_b_recon, sup_loss),)
 
-        if (iterations + 1) % config['snapshot_test_epoch'] == 0:
+            # Dump training stats in log file
+            if (iterations + 1) % config['log_iter'] == 0:
 
-            metric_file = open('logs/' + opts.config.split('/')
-                               [-1].replace('.yaml', '_metric.log'), 'a')
-            y_pred = list()
-            y_true = list()
+                # recon_x_w_a, recon_s_w_a, recon_c_w_a, recon_x_w_b, recon_s_w_b, recon_c_w_b, recon_x_cyc_w_a, recon_x_cyc_w_b, loss_gen = gen_losses
+                # sup_a, sup_b, sup_a_recon, sup_b_recon, sup_loss = sup_losses
 
-            print("Testing...")
+                print('Iteration: %d/%d, datasets [%s, %s]' % (
+                    iterations + 1, max_iter, ind_a, ind_b), file=open(str(opts.output_path + "/output.txt"), "a"))
+                print('    Gen Losses: x_w_a %.3f, s_w_a %.3f, c_w_a %.3f, x_w_b %.3f, s_w_b %.3f, c_w_b %.3f, x_cyc_w_a %.3f, x_cyc_w_b %.3f, loss_gen %.3f' % (
+                    recon_x_w_a, recon_s_w_a, recon_c_w_a, recon_x_w_b, recon_s_w_b, recon_c_w_b, recon_x_cyc_w_a, recon_x_cyc_w_b, loss_gen), file=open(str(opts.output_path + "/output.txt"), "a"))
 
-            for it, data in enumerate(test_loader):
-                x1, x2, ind1, ind2, y1, y2 = data
+                print('    Sup Losses: a %.3f, b %.3f, a_recon %.3f, b_recon %.3f, loss_sup %.3f' % (
+                    sup_a, sup_b, sup_a_recon, sup_b_recon, sup_loss), file=open(str(opts.output_path + "/output.txt"), "a"))
+                sys.stdout.flush()
 
-                x1 = x1.cuda(cuda1)
-                x2 = x1.cuda(cuda1)
-                y1 = y1.cuda(cuda1)
-                y2 = y2.cuda(cuda1)
+            if (iterations + 1) % config['snapshot_test_epoch'] == 0:
 
-                preds1 = trainer.sup_forward(x1, ind1[0].item(), config)
-                preds2 = trainer.sup_forward(x2, ind2[0].item(), config)
+                metric_file = open('logs/' + opts.config.split('/')
+                                   [-1].replace('.yaml', '_metric.log'), 'a')
+                y_pred = list()
+                y_true = list()
 
-                y_pred.extend(preds1.cpu().numpy())
-                y_pred.extend(preds2.cpu().numpy())
+                print("Testing...")
 
-                y_true.extend(y1.cpu().numpy())
-                y_true.extend(y2.cpu().numpy())
+                for it, data in enumerate(test_loader):
+                    x1, x2, ind1, ind2, y1, y2 = data
 
-            weighted_acc = balanced_accuracy_score(y_true, y_pred)
+                    x1 = x1.cuda(cuda1)
+                    x2 = x1.cuda(cuda1)
+                    y1 = y1.cuda(cuda1)
+                    y2 = y2.cuda(cuda1)
 
-            precision = precision_score(y_true, y_pred, average='macro')
+                    preds1 = trainer.sup_forward(x1, ind1[0].item(), config)
+                    preds2 = trainer.sup_forward(x2, ind2[0].item(), config)
 
-            cm = confusion_matrix(y_true, y_pred, normalize='true')
+                    y_pred.extend(preds1.cpu().numpy())
+                    y_pred.extend(preds2.cpu().numpy())
 
-            f1 = f1_score(y_true, y_pred, average='macro')
+                    y_true.extend(y1.cpu().numpy())
+                    y_true.extend(y2.cpu().numpy())
 
-            recall = recall_score(y_true, y_pred, average='macro')
+                weighted_acc = balanced_accuracy_score(y_true, y_pred)
 
-            print("Test Balanced Accuracy iteration {}: {}".format(
-                (iterations+1), (100 * weighted_acc)))
+                precision = precision_score(y_true, y_pred, average='macro')
 
-            print("Test Balanced Accuracy iteration {}: {}".format(
-                (iterations+1), (100 * weighted_acc)), file=metric_file)
+                cm = confusion_matrix(y_true, y_pred, normalize='true')
 
-            print("Test Precision iteration {}: {}".format(
-                (iterations+1), (100 * precision)))
+                f1 = f1_score(y_true, y_pred, average='macro')
 
-            print("Test Precision iteration {}: {}".format(
-                (iterations+1), (100 * precision)), file=metric_file)
+                recall = recall_score(y_true, y_pred, average='macro')
 
-            print("Test F1 Score iteration {}: {}".format(
-                (iterations+1), (100 * f1)))
+                print("Test Balanced Accuracy iteration {}: {}".format(
+                    (iterations+1), (100 * weighted_acc)))
 
-            print("Test F1 Score iteration {}: {}".format(
-                (iterations+1), (100 * f1)), file=metric_file)
+                print("Test Balanced Accuracy iteration {}: {}".format(
+                    (iterations+1), (100 * weighted_acc)), file=metric_file)
 
-            print("Test Recall iteration {}: {}".format(
-                (iterations+1), (100 * recall)))
+                print("Test Precision iteration {}: {}".format(
+                    (iterations+1), (100 * precision)))
 
-            print("Test Recall iteration {}: {}".format(
-                (iterations+1), (100 * recall)), file=metric_file)
+                print("Test Precision iteration {}: {}".format(
+                    (iterations+1), (100 * precision)), file=metric_file)
 
-            print("Test Confusion Matrix iteration {}: \n{}\n".format(
-                (iterations+1), cm))
+                print("Test F1 Score iteration {}: {}".format(
+                    (iterations+1), (100 * f1)))
 
-            print("Test Confusion Matrix iteration {}: \n{}\n".format(
-                (iterations+1), cm), file=metric_file)
+                print("Test F1 Score iteration {}: {}".format(
+                    (iterations+1), (100 * f1)), file=metric_file)
 
-        # Save network weights
-        if (iterations + 1) % config['snapshot_save_iter'] == 0:
-            trainer.save(checkpoint_directory, iterations)
+                print("Test Recall iteration {}: {}".format(
+                    (iterations+1), (100 * recall)))
 
-        iterations += 1
-        if iterations >= max_iter:
-            sys.exit('Finish training')
+                print("Test Recall iteration {}: {}".format(
+                    (iterations+1), (100 * recall)), file=metric_file)
 
-        trainer.update_learning_rate()
+                print("Test Confusion Matrix iteration {}: \n{}\n".format(
+                    (iterations+1), cm))
+
+                print("Test Confusion Matrix iteration {}: \n{}\n".format(
+                    (iterations+1), cm), file=metric_file)
+
+                metric_file.close()
+
+            # Save network weights
+            if (iterations + 1) % config['snapshot_save_iter'] == 0:
+                trainer.save(checkpoint_directory, iterations)
+
+            iterations += 1
+            if iterations >= max_iter:
+                sys.exit('Finish training')
+
+            trainer.update_learning_rate()
+
+except Exception as e:     # most generic exception you can catch
+    logf = open("logs/error.log", "a")
+    logf.write(str(e))
+    traceback.print_exc(file=logf)
