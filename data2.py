@@ -26,7 +26,7 @@ def get_img_list(dir, dataset_number, csv_file, mode, label_use=True,):
     labels = pd.read_csv(dir + 'dataset' + str(dataset_number) + '/' +
                          csv_file, usecols=['Image_ID', 'Labels'])
 
-    tam_dataset = labels.shape[0]*0.25
+    tam_dataset = labels.shape[0]
 
     if mode == 'train':
         tam_list = int(0.8*tam_dataset)
@@ -170,8 +170,8 @@ class ImageFolder(data.Dataset):
 
         # Normalization and transformation to tensor.
         img = img.astype(np.float32)
-        img = (img - img.mean()) / (img.std() + 1e-10)
-        #img = (img - img.min()) / (img.max() - img.min()) - 0.5
+        # img = (img - img.mean()) / (img.std() + 1e-10)
+        img = (img - img.min()) / (img.max() - img.min() + 1e-10) - 0.5
         img = np.expand_dims(img, axis=0)
 
         if len(img.shape) != 3:

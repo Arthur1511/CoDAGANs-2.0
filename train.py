@@ -3,6 +3,7 @@ Copyright (C) 2018 NVIDIA Corporation.  All rights reserved.
 Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
 """
 import argparse
+from matplotlib import pyplot as plt
 
 import numpy as np
 import torch
@@ -24,6 +25,11 @@ import shutil
 import sys
 import traceback
 
+import seaborn as sns
+from tensorboardX import SummaryWriter
+
+# python train.py --resume --tensorboard
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--config', type=str,
                     default='configs/demo_cxr_lungs.yaml', help='Path to the config file.')
@@ -31,6 +37,8 @@ parser.add_argument('--output_path', type=str,
                     default='output', help="outputs path")
 parser.add_argument("--resume", action="store_true")
 parser.add_argument('--trainer', type=str, default='MUNIT', help="MUNIT|UNIT")
+parser.add_argument('--board', type=str,
+                    default='train/', help='Path tensorboard file.')
 opts = parser.parse_args()
 
 cudnn.benchmark = True
@@ -95,6 +103,12 @@ if not os.path.exists('logs/'):
 iterations = trainer.resume(
     checkpoint_directory, hyperparameters=config) if opts.resume else 0
 
+# creating tensorboar file
+# current_time = datetime.datetime.now().strftime("%d%m%Y-%H%M%S")
+if opts.resume:
+    writer = SummaryWriter('runs/' + opts.board, purge_step=iterations)
+else:
+    writer = SummaryWriter('runs/' + opts.board)
 
 print('Training starts...')
 
@@ -128,9 +142,11 @@ try:
                 iterations + 1, max_iter, ind_a, ind_b),)
             print('    Gen Losses: x_w_a %.3f, s_w_a %.3f, c_w_a %.3f, x_w_b %.3f, s_w_b %.3f, c_w_b %.3f, x_cyc_w_a %.3f, x_cyc_w_b %.3f, loss_gen %.3f' % (
                 recon_x_w_a, recon_s_w_a, recon_c_w_a, recon_x_w_b, recon_s_w_b, recon_c_w_b, recon_x_cyc_w_a, recon_x_cyc_w_b, loss_gen),)
+            writer.add_scalar("Train/Gen Loss", loss_gen, iterations)
 
             print('    Sup Losses: a %.3f, b %.3f, a_recon %.3f, b_recon %.3f, loss_sup %.3f' % (
                 sup_a, sup_b, sup_a_recon, sup_b_recon, sup_loss),)
+            writer.add_scalar("Train/Sup Loss", sup_loss, iterations)
 
             # Dump training stats in log file
             if (iterations + 1) % config['log_iter'] == 0:
@@ -189,11 +205,17 @@ try:
                 print("Test Balanced Accuracy iteration {}: {}".format(
                     (iterations+1), (100 * weighted_acc)), file=metric_file)
 
+                writer.add_scalar("Test/Balanced Accuracy",
+                                  (100 * weighted_acc), iterations)
+
                 print("Test Precision iteration {}: {}".format(
                     (iterations+1), (100 * precision)))
 
                 print("Test Precision iteration {}: {}".format(
                     (iterations+1), (100 * precision)), file=metric_file)
+
+                writer.add_scalar("Test/Precision",
+                                  (100 * precision), iterations)
 
                 print("Test F1 Score iteration {}: {}".format(
                     (iterations+1), (100 * f1)))
@@ -201,17 +223,27 @@ try:
                 print("Test F1 Score iteration {}: {}".format(
                     (iterations+1), (100 * f1)), file=metric_file)
 
+                writer.add_scalar("Test/F1 Score", (100 * f1), iterations)
+
                 print("Test Recall iteration {}: {}".format(
                     (iterations+1), (100 * recall)))
 
                 print("Test Recall iteration {}: {}".format(
                     (iterations+1), (100 * recall)), file=metric_file)
 
+                writer.add_scalar("Test/Recall", (100 * recall), iterations)
+
                 print("Test Confusion Matrix iteration {}: \n{}\n".format(
                     (iterations+1), cm))
 
                 print("Test Confusion Matrix iteration {}: \n{}\n".format(
                     (iterations+1), cm), file=metric_file)
+
+                # cm_fig = plt.figure(figsize=(7, 7))
+                # sns.heatmap(cm.round(3), vmin=0,
+                #             vmax=1, cmap="RdBu", annot=True)
+
+                # writer.add_figure("Confusion Matrix", cm_fig, iterations)
 
                 metric_file.close()
 
@@ -229,3 +261,6 @@ except Exception as e:     # most generic exception you can catch
     logf = open("logs/error.log", "a")
     logf.write(str(e))
     traceback.print_exc(file=logf)
+    writer.close()
+
+writer.close()
